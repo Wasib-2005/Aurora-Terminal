@@ -10,6 +10,10 @@ The theme works with desktop sessions detected by SDDM, including KDE Plasma,
 GNOME, and other installed sessions. The login greeter is separate from the
 desktop session you choose.
 
+## Preview
+
+![Aurora Terminal SDDM login screen with its clock, login form, session selector, and power controls](./assets/aurora-terminal-login.png)
+
 ## Features
 
 - Minimal dark login screen with responsive layout
@@ -18,7 +22,7 @@ desktop session you choose.
 - SDDM session selector for choosing an installed desktop environment
 - Keyboard-friendly login: Enter moves between fields and submits credentials
 - Sleep, restart, and power-off buttons that follow SDDM's available actions
-- No external images, fonts, or network access required
+- No external assets or network access required at runtime
 
 ## Requirements
 

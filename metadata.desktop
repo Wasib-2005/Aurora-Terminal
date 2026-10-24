@@ -1,0 +1,13 @@
+[SddmGreeterTheme]
+Name=Aurora Terminal
+Description=A minimal terminal-inspired login theme for SDDM
+Author=Waslla
+License=MIT
+Type=sddm-theme
+Version=1.0
+Website=
+Screenshot=
+MainScript=Main.qml
+Theme-Id=aurora-glass-sddm
+Theme-API=2.0
+QtVersion=6

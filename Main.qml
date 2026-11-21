@@ -25,6 +25,17 @@ Item {
     property real gridPhase: 0
     property real secFrac: 0
     property string hexLine: "00 00 00 00 00 00 00 00"
+    property int statusTick: 0
+    property bool denied: false
+    property int checkStep: 0
+    property int spinStep: 0
+    readonly property var checkMessages: ["CHECKING CREDENTIALS", "VERIFYING IDENTITY", "DECRYPTING KEYS", "VALIDATING SESSION"]
+    readonly property var statusMessages: ["CHECKING SYSTEM", "VERIFYING SERVICES", "HANDING OVER CONTROL TO USER", "SCANNING FOR INPUT"]
+    // Plays through once, then stays on the last message with animated dots
+    readonly property string statusLine: {
+        var i = Math.min(Math.floor(statusTick / 6), statusMessages.length - 1)
+        return statusMessages[i] + ["", ".", "..", "..."][statusTick % 4]
+    }
     readonly property int gridCols: Math.ceil(width / 64) + 1
     readonly property int gridRows: Math.ceil(height / 64) + 1
     Behavior on smoothX { enabled: root.motionActive; NumberAnimation { duration: 450; easing.type: Easing.OutCubic } }
@@ -49,7 +60,7 @@ Item {
         var out = []
         for (var i = 0; i < 8; i++)
             out.push(("0" + Math.floor(Math.random() * 256).toString(16)).slice(-2).toUpperCase())
-        return out.join(" ")
+            return out.join(" ")
     }
 
     function refreshClock() {
@@ -75,16 +86,22 @@ Item {
     }
 
     function submitLogin() {
-        if (usernameField.text.trim().length === 0) {
-            message = "Username is required."
-            usernameField.forceActiveFocus()
+        if (authenticating || leaving)
             return
-        }
 
-        message = ""
-        authFailed = false
-        authenticating = true
-        sddm.login(usernameField.text, passwordField.text, Math.max(sessionBox.currentIndex, 0))
+            if (usernameField.text.trim().length === 0) {
+                message = "Username is required."
+                usernameField.forceActiveFocus()
+                return
+            }
+
+            message = ""
+            authFailed = false
+            denied = false
+            checkStep = 0
+            spinStep = 0
+            authenticating = true
+            sddm.login(usernameField.text, passwordField.text, Math.max(sessionBox.currentIndex, 0))
     }
 
     function focusInitialInput() {
@@ -184,6 +201,34 @@ Item {
     }
 
     Timer {
+        interval: 450
+        running: root.motionActive
+        repeat: true
+        onTriggered: root.statusTick++
+    }
+
+    Timer {
+        interval: 650
+        running: root.authenticating
+        repeat: true
+        onTriggered: root.checkStep++
+    }
+
+    Timer {
+        interval: 90
+        running: root.authenticating
+        repeat: true
+        onTriggered: root.spinStep++
+    }
+
+    Timer {
+        id: deniedTimer
+        interval: 2200
+        repeat: false
+        onTriggered: root.denied = false
+    }
+
+    Timer {
         id: clockTimer
         interval: 1000
         running: root.screenActive
@@ -228,6 +273,8 @@ Item {
             root.message = "Authentication failed. Check your password and try again."
             root.authFailed = true
             root.authenticating = false
+            root.denied = true
+            deniedTimer.restart()
             passwordField.text = ""
             passwordField.forceActiveFocus()
             if (root.animationsEnabled)
@@ -237,6 +284,7 @@ Item {
             root.message = ""
             root.authFailed = false
             root.authenticating = false
+            root.denied = false
             root.leaving = true
         }
     }
@@ -937,7 +985,7 @@ Item {
             id: clockSub
             anchors.top: clockRow.bottom
             anchors.topMargin: 18
-            text: root.typeText("LOCAL SESSION  /  READY FOR INPUT", 0.4, 0.5)
+            text: root.stage(0.4, 0.5) < 1 ? root.typeText("CHECKING SYSTEM", 0.4, 0.5) : root.statusLine
             color: "#758680"
             font.family: "monospace"
             font.pixelSize: 11
@@ -1315,7 +1363,58 @@ Item {
             width: parent.width
             height: root.compact ? 42 : 50
             scale: down ? 0.985 : 1
-            text: root.authenticating ? "AUTHENTICATING" : "ENTER SESSION"
+            property color tone: root.denied ? "#ff8a80" : "#b6fa73"
+            Behavior on tone { enabled: root.motionActive; ColorAnimation { duration: 160 } }
+
+            // Loading-bar fill, left -> right
+            property real fill: 0
+
+            NumberAnimation {
+                id: fillAnim
+                target: signInButton
+                property: "fill"
+                from: 0
+                to: 0.9
+                duration: 2500
+                easing.type: Easing.OutCubic
+            }
+
+            NumberAnimation {
+                id: fillFinish
+                target: signInButton
+                property: "fill"
+                to: 1
+                duration: 180
+                easing.type: Easing.OutQuad
+            }
+
+            Connections {
+                target: root
+                function onAuthenticatingChanged() {
+                    if (root.authenticating) {
+                        fillFinish.stop()
+                        fillAnim.restart()
+                    }
+                }
+                function onLeavingChanged() {
+                    if (root.leaving) {
+                        fillAnim.stop()
+                        fillFinish.restart()
+                    }
+                }
+                function onDeniedChanged() {
+                    if (root.denied) {
+                        fillAnim.stop()
+                        fillFinish.restart()
+                    } else if (!root.authenticating && !root.leaving) {
+                        signInButton.fill = 0
+                    }
+                }
+            }
+            text: root.leaving ? "ACCESS GRANTED"
+            : root.denied ? "ACCESS DENIED"
+            : root.authenticating ? root.checkMessages[root.checkStep % root.checkMessages.length]
+            : "ENTER SESSION"
             onClicked: root.submitLogin()
             Behavior on scale { enabled: root.motionActive; NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
             contentItem: Row {
@@ -1323,15 +1422,19 @@ Item {
                 anchors.centerIn: parent
                 Behavior on spacing { enabled: root.motionActive; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
                 Text {
-                    text: ">"
-                    color: "#b6fa73"
+                    // idle ">", checking spinner, success check, denied cross
+                    text: root.leaving ? "✓"
+                    : root.denied ? "x"
+                    : root.authenticating ? ["|", "/", "-", "\\"][root.spinStep % 4]
+                    : ">"
+                    color: signInButton.tone
                     font.family: "monospace"
                     font.pixelSize: 15
                     font.weight: Font.Bold
                 }
                 Text {
                     text: signInButton.text
-                    color: "#b6fa73"
+                    color: signInButton.tone
                     font.family: "monospace"
                     font.pixelSize: 12
                     font.weight: Font.Bold
@@ -1339,9 +1442,29 @@ Item {
                 }
             }
             background: Rectangle {
-                color: signInButton.down ? "#263b2b" : signInButton.hovered ? "#1b2d22" : "transparent"
-                border.color: "#b6fa73"
+                color: root.leaving ? "#2a4a30"
+                : root.denied ? (signInButton.hovered ? "#4a2421" : "#3a1d1b")
+                : signInButton.down ? "#263b2b" : signInButton.hovered ? "#1b2d22" : "transparent"
+                border.color: signInButton.tone
                 border.width: signInButton.activeFocus ? 2 : 1
+
+                Rectangle {
+                    x: 1
+                    y: 1
+                    width: Math.max(0, (parent.width - 2) * signInButton.fill)
+                    height: parent.height - 2
+                    color: signInButton.tone
+                    opacity: 0.25
+
+                    Rectangle {
+                        anchors.right: parent.right
+                        width: 2
+                        height: parent.height
+                        color: signInButton.tone
+                        opacity: 0.9
+                        visible: parent.width > 2
+                    }
+                }
                 Behavior on color { enabled: root.motionActive; ColorAnimation { duration: 120 } }
 
                 Item {
@@ -1663,7 +1786,7 @@ Item {
         focusInitialInput()
         if (animationsEnabled)
             introAnim.start()
-        else
-            intro = 1
+            else
+                intro = 1
     }
 }

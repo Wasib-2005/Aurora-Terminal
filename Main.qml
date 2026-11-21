@@ -16,12 +16,19 @@ Item {
     property bool authFailed: false
     property bool leaving: false
     property bool authenticating: false
-    property bool glitching: false
-    property int glitchStep: 0
-    property real gx: 0
-    property real gy: 0
-    property real gflick: 1
     property real intro: 0
+    property real pointerX: width / 2
+    property real pointerY: height / 2
+    property real smoothX: pointerX
+    property real smoothY: pointerY
+    property bool pointerDown: false
+    property real gridPhase: 0
+    property real secFrac: 0
+    property string hexLine: "00 00 00 00 00 00 00 00"
+    readonly property int gridCols: Math.ceil(width / 64) + 1
+    readonly property int gridRows: Math.ceil(height / 64) + 1
+    Behavior on smoothX { enabled: root.motionActive; NumberAnimation { duration: 450; easing.type: Easing.OutCubic } }
+    Behavior on smoothY { enabled: root.motionActive; NumberAnimation { duration: 450; easing.type: Easing.OutCubic } }
     property string idleFocusTarget: ""
     readonly property bool motionActive: screenActive && animationsEnabled
     readonly property bool compact: width < 900 || height < 680
@@ -38,6 +45,13 @@ Item {
         return str.substring(0, Math.round(str.length * stage(start, span)))
     }
 
+    function randomHex() {
+        var out = []
+        for (var i = 0; i < 8; i++)
+            out.push(("0" + Math.floor(Math.random() * 256).toString(16)).slice(-2).toUpperCase())
+        return out.join(" ")
+    }
+
     function refreshClock() {
         var now = new Date()
         var hour = now.getHours()
@@ -47,6 +61,17 @@ Item {
         root.dateText = Qt.formatDate(now, "dddd, d MMMM")
         // Sleep until the next minute boundary instead of polling every second
         clockTimer.interval = 60000 - now.getSeconds() * 1000 - now.getMilliseconds() + 30
+
+        // Seconds progress bar: start at the real position inside the minute
+        var elapsed = now.getSeconds() * 1000 + now.getMilliseconds()
+        secAnim.stop()
+        root.secFrac = elapsed / 60000
+        if (root.animationsEnabled) {
+            secAnim.from = root.secFrac
+            secAnim.to = 1
+            secAnim.duration = Math.max(60000 - elapsed, 1)
+            secAnim.start()
+        }
     }
 
     function submitLogin() {
@@ -120,6 +145,7 @@ Item {
             introAnim.stop()
             intro = 1
         }
+        refreshClock()
     }
 
     NumberAnimation {
@@ -132,35 +158,29 @@ Item {
         easing.type: Easing.Linear
     }
 
-    Timer {
-        id: glitchTimer
-        interval: 2500
-        running: root.motionActive && !root.glitching
-        repeat: true
-        onTriggered: {
-            root.glitchStep = 0
-            root.glitching = true
-        }
+    NumberAnimation {
+        id: secAnim
+        target: root
+        property: "secFrac"
+        easing.type: Easing.Linear
+    }
+
+    NumberAnimation {
+        id: gridAnim
+        target: root
+        property: "gridPhase"
+        from: 0
+        to: 1
+        duration: 9000
+        loops: Animation.Infinite
+        running: root.motionActive
     }
 
     Timer {
-        interval: 45
-        running: root.glitching
+        interval: 140
+        running: root.motionActive && root.width > 1200
         repeat: true
-        onTriggered: {
-            root.glitchStep++
-            if (root.glitchStep >= 7 || !root.motionActive) {
-                root.glitching = false
-                root.gx = 0
-                root.gy = 0
-                root.gflick = 1
-                glitchTimer.interval = 2200 + Math.random() * 4500
-            } else {
-                root.gx = (Math.random() - 0.5) * 16
-                root.gy = (Math.random() - 0.5) * 4
-                root.gflick = Math.random() > 0.55 ? 0.7 : 1
-            }
-        }
+        onTriggered: root.hexLine = root.randomHex()
     }
 
     Timer {
@@ -179,11 +199,17 @@ Item {
     }
 
     HoverHandler {
-        onPointChanged: root.noteActivity()
+        id: pointerHover
+        onPointChanged: {
+            root.noteActivity()
+            root.pointerX = point.position.x
+            root.pointerY = point.position.y
+        }
     }
 
     TapHandler {
         onPressedChanged: {
+            root.pointerDown = pressed
             if (pressed)
                 root.noteActivity()
         }
@@ -227,6 +253,10 @@ Item {
         x: root.width * 0.21
         y: root.height * 0.04
         rotation: -18
+        transform: Translate {
+            x: (root.smoothX / root.width - 0.5) * -34
+            y: (root.smoothY / root.height - 0.5) * -22
+        }
         gradient: Gradient {
             GradientStop { position: 0.0; color: "#14252b" }
             GradientStop { position: 0.48; color: "#0e191e" }
@@ -278,6 +308,10 @@ Item {
         x: root.width * 0.12
         y: root.height * 0.1
         rotation: -18
+        transform: Translate {
+            x: (root.smoothX / root.width - 0.5) * -56
+            y: (root.smoothY / root.height - 0.5) * -36
+        }
         property real glowOpacity: 0.16
         opacity: glowOpacity * root.stage(0, 0.9)
         gradient: Gradient {
@@ -322,6 +356,37 @@ Item {
                 duration: 9000
                 easing.type: Easing.InOutSine
             }
+        }
+    }
+
+    // Faint grid with brightness waves drifting across it
+    Repeater {
+        model: root.gridCols
+
+        Rectangle {
+            required property int index
+            property real wavePos: (1 - root.gridPhase) * (root.gridCols + 6) - 3
+            property real wave: Math.max(0, 1 - Math.abs(index - wavePos) / 3)
+            x: index * 64
+            width: 1
+            height: root.height
+            color: "#2f6b5c"
+            opacity: (0.09 + 0.32 * wave) * root.stage(0, 0.9)
+        }
+    }
+
+    Repeater {
+        model: root.gridRows
+
+        Rectangle {
+            required property int index
+            property real wavePos: (1 - ((root.gridPhase + 0.4) % 1)) * (root.gridRows + 6) - 3
+            property real wave: Math.max(0, 1 - Math.abs(index - wavePos) / 3)
+            y: index * 64
+            width: root.width
+            height: 1
+            color: "#2f6b5c"
+            opacity: (0.09 + 0.32 * wave) * root.stage(0, 0.9)
         }
     }
 
@@ -380,50 +445,203 @@ Item {
         }
     }
 
-    // Glitch tear slices
-    Repeater {
-        model: 3
-
-        Rectangle {
-            required property int index
-            visible: root.glitching
-            width: root.width * (0.4 + index * 0.2)
-            height: 2 + index * 2
-            x: root.gx * 6 + index * root.width * 0.15
-            y: root.height * (0.18 + index * 0.27) + root.gy * 14
-            color: index === 1 ? "#2fe0ff" : "#b6fa73"
-            opacity: 0.1
-        }
-    }
-
-    // Scan band
+    // Radar dial behind the clock: slow tick ring plus a sweep arm with a fading trail
     Item {
-        id: scanBand
-        width: root.width
-        height: 90
-        y: -90
-        visible: root.animationsEnabled
+        id: radar
+        visible: !root.compact && root.animationsEnabled
+        width: 600
+        height: 600
+        x: Math.max(68, root.width * 0.105) + Math.min(root.width * 0.46, 680) / 2 - 300
+        y: root.height / 2 - 15 - 300
+        opacity: root.stage(0.1, 0.7)
 
-        Rectangle {
+        Item {
             anchors.fill: parent
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: "#00b6fa73" }
-                GradientStop { position: 1.0; color: "#0eb6fa73" }
+
+            NumberAnimation on rotation {
+                from: 0
+                to: 360
+                duration: 120000
+                loops: Animation.Infinite
+                running: root.motionActive
+            }
+
+            Repeater {
+                model: 72
+
+                Rectangle {
+                    required property int index
+                    x: 299.5
+                    y: 0
+                    width: 1
+                    height: index % 6 === 0 ? 11 : 5
+                    color: index % 6 === 0 ? "#4f8f6f" : "#2a5a52"
+                    opacity: index % 6 === 0 ? 0.8 : 0.5
+                    transform: Rotation { origin.x: 0.5; origin.y: 300; angle: index * 5 }
+                }
             }
         }
 
-        Rectangle {
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 1
-            color: "#22b6fa73"
+        Item {
+            anchors.fill: parent
+
+            NumberAnimation on rotation {
+                from: 0
+                to: 360
+                duration: 9000
+                loops: Animation.Infinite
+                running: root.motionActive
+            }
+
+            Repeater {
+                model: 16
+
+                Rectangle {
+                    required property int index
+                    x: 299.5
+                    y: 0
+                    width: 1
+                    height: 105
+                    color: "#b6fa73"
+                    opacity: (1 - index / 16) * 0.28
+                    transform: Rotation { origin.x: 0.5; origin.y: 300; angle: -index * 1.5 }
+                }
+            }
+
+            Rectangle {
+                x: 297
+                y: -3
+                width: 6
+                height: 6
+                radius: 3
+                color: "#b6fa73"
+                opacity: 0.9
+            }
+        }
+    }
+
+    // Vertical scanner (top -> bottom), runs on its own random schedule
+    Item {
+        id: vScan
+        anchors.fill: parent
+        property bool active: false
+        property real progress: 0
+        visible: root.animationsEnabled && active
+
+        Item {
+            width: root.width
+            height: 90
+            y: -90 + vScan.progress * (root.height + 90)
+
+            Rectangle {
+                anchors.fill: parent
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "#00b6fa73" }
+                    GradientStop { position: 1.0; color: "#0eb6fa73" }
+                }
+            }
+            Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: 1
+                color: "#22b6fa73"
+            }
         }
 
-        SequentialAnimation on y {
-            loops: Animation.Infinite
-            running: root.motionActive
-            PauseAnimation { duration: 3500 }
-            NumberAnimation { from: -90; to: root.height; duration: 6500 }
+        Timer {
+            id: vScanTimer
+            interval: 1500 + Math.random() * 4000
+            running: root.motionActive && !vScan.active
+            repeat: false
+            onTriggered: {
+                vScan.progress = 0
+                vScan.active = true
+                vScanAnim.restart()
+            }
+        }
+
+        NumberAnimation {
+            id: vScanAnim
+            target: vScan
+            property: "progress"
+            from: 0
+            to: 1
+            duration: 6000
+            onStopped: {
+                vScanTimer.interval = 1500 + Math.random() * 5000
+                vScan.active = false
+            }
+        }
+
+        Connections {
+            target: root
+            function onMotionActiveChanged() {
+                if (!root.motionActive)
+                    vScanAnim.stop()
+            }
+        }
+    }
+
+    // Horizontal scanner (left -> right), independent of the vertical one; both can run together
+    Item {
+        id: hScan
+        anchors.fill: parent
+        property bool active: false
+        property real progress: 0
+        visible: root.animationsEnabled && active
+
+        Item {
+            width: 90
+            height: root.height
+            x: -90 + hScan.progress * (root.width + 90)
+
+            Rectangle {
+                anchors.fill: parent
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0.0; color: "#00b6fa73" }
+                    GradientStop { position: 1.0; color: "#0eb6fa73" }
+                }
+            }
+            Rectangle {
+                anchors.right: parent.right
+                height: parent.height
+                width: 1
+                color: "#22b6fa73"
+            }
+        }
+
+        Timer {
+            id: hScanTimer
+            interval: 1000 + Math.random() * 3000
+            running: root.motionActive && !hScan.active
+            repeat: false
+            onTriggered: {
+                hScan.progress = 0
+                hScan.active = true
+                hScanAnim.restart()
+            }
+        }
+
+        NumberAnimation {
+            id: hScanAnim
+            target: hScan
+            property: "progress"
+            from: 0
+            to: 1
+            duration: 7000
+            onStopped: {
+                hScanTimer.interval = 1500 + Math.random() * 5000
+                hScan.active = false
+            }
+        }
+
+        Connections {
+            target: root
+            function onMotionActiveChanged() {
+                if (!root.motionActive)
+                    hScanAnim.stop()
+            }
         }
     }
 
@@ -435,11 +653,53 @@ Item {
         font.letterSpacing: 1
     }
 
+    // Edge rulers: tick scales drifting in opposite directions on each side
+    Repeater {
+        model: root.compact ? 0 : 2
+
+        Item {
+            id: ruler
+            required property int index
+            x: index === 0 ? 20 : root.width - 30
+            y: 0
+            width: 10
+            height: root.height
+            clip: true
+            opacity: root.stage(0.2, 0.6) * 0.6
+
+            Item {
+                width: ruler.width
+                height: ruler.height
+
+                NumberAnimation on y {
+                    from: ruler.index === 0 ? 0 : -60
+                    to: ruler.index === 0 ? -60 : 0
+                    duration: 6000
+                    loops: Animation.Infinite
+                    running: root.motionActive
+                }
+
+                Repeater {
+                    model: Math.ceil(root.height / 12) + 12
+
+                    Rectangle {
+                        required property int index
+                        y: index * 12
+                        width: index % 5 === 0 ? 10 : 5
+                        x: ruler.index === 0 ? 0 : 10 - width
+                        height: 1
+                        color: index % 5 === 0 ? "#4f7a63" : "#31483f"
+                    }
+                }
+            }
+        }
+    }
+
     // Corner brackets around the login form
     Item {
         id: formFrame
         visible: !root.compact
-        x: loginForm.x - 20 - root.gx * 0.8
+        x: loginForm.x - 20
         y: loginForm.y - 20
         width: loginForm.width + 40
         height: loginForm.height + 40
@@ -465,6 +725,23 @@ Item {
         Rectangle { x: 0; y: formFrame.height - formFrame.len; width: 1; height: formFrame.len; color: formFrame.tone }
         Rectangle { x: formFrame.width - formFrame.len; y: formFrame.height - 1; width: formFrame.len; height: 1; color: formFrame.tone }
         Rectangle { x: formFrame.width - 1; y: formFrame.height - formFrame.len; width: 1; height: formFrame.len; color: formFrame.tone }
+
+        // A light that travels the perimeter (faster while authenticating)
+        property real lap: 0
+        property real dist: lap * 2 * (width + height)
+        property real runX: dist < width ? dist : dist < width + height ? width : dist < 2 * width + height ? width - (dist - width - height) : 0
+        property real runY: dist < width ? 0 : dist < width + height ? dist - width : dist < 2 * width + height ? height : height - (dist - 2 * width - height)
+
+        NumberAnimation on lap {
+            from: 0
+            to: 1
+            duration: root.authenticating ? 2000 : 8000
+            loops: Animation.Infinite
+            running: root.motionActive && !root.compact
+        }
+
+        Rectangle { x: formFrame.runX - 6; y: formFrame.runY - 6; width: 12; height: 12; color: "#b6fa73"; opacity: 0.16 }
+        Rectangle { x: formFrame.runX - 2; y: formFrame.runY - 2; width: 4; height: 4; color: "#b6fa73" }
     }
 
     Rectangle {
@@ -493,8 +770,7 @@ Item {
         anchors.rightMargin: root.compact ? 24 : 52
         anchors.topMargin: root.compact ? 22 : 34
         height: 26
-        opacity: root.stage(0, 0.4) * root.gflick
-        transform: Translate { x: -root.gx }
+        opacity: root.stage(0, 0.4)
 
         Text {
             anchors.left: parent.left
@@ -569,11 +845,8 @@ Item {
 
     Item {
         id: clockPanel
-        opacity: root.stage(0.05, 0.5) * root.gflick
-        transform: [
-            Translate { y: (1 - root.stage(0.05, 0.5)) * 22 },
-            Translate { x: root.gx; y: root.gy }
-        ]
+        opacity: root.stage(0.05, 0.5)
+        transform: Translate { y: (1 - root.stage(0.05, 0.5)) * 22 }
         anchors.left: root.compact ? undefined : parent.left
         anchors.leftMargin: root.compact ? 0 : Math.max(68, root.width * 0.105)
         anchors.horizontalCenter: root.compact ? parent.horizontalCenter : undefined
@@ -594,26 +867,6 @@ Item {
             font.family: "monospace"
             font.pixelSize: root.compact ? 11 : 14
             font.letterSpacing: root.compact ? 1.3 : 1.3 + (1 - root.stage(0.05, 0.6)) * 3
-        }
-
-        Repeater {
-            model: 2
-
-            Text {
-                required property int index
-                visible: root.glitching
-                anchors.left: root.compact ? undefined : parent.left
-                anchors.horizontalCenter: root.compact ? parent.horizontalCenter : undefined
-                anchors.top: clockDate.bottom
-                anchors.topMargin: root.compact ? 7 : 18
-                text: root.hourText + ":" + root.minuteText
-                color: index === 0 ? "#ff2f5f" : "#2fe0ff"
-                opacity: 0.45
-                font.family: "monospace"
-                font.pixelSize: root.compact ? 52 : Math.min(164, root.width * 0.105)
-                font.weight: Font.Light
-                transform: Translate { x: (index === 0 ? -1 : 1) * (4 + Math.abs(root.gx)) }
-            }
         }
 
         Row {
@@ -681,6 +934,7 @@ Item {
         Text {
             visible: !root.compact
             anchors.left: parent.left
+            id: clockSub
             anchors.top: clockRow.bottom
             anchors.topMargin: 18
             text: root.typeText("LOCAL SESSION  /  READY FOR INPUT", 0.4, 0.5)
@@ -690,15 +944,42 @@ Item {
             font.letterSpacing: 1.2
             opacity: root.stage(0.3, 0.4)
         }
+
+        // Seconds progress: fills over the current minute
+        Item {
+            visible: !root.compact
+            anchors.left: parent.left
+            anchors.top: clockSub.bottom
+            anchors.topMargin: 14
+            width: 280
+            height: 5
+            opacity: root.stage(0.4, 0.4)
+
+            Repeater {
+                model: 5
+
+                Rectangle {
+                    required property int index
+                    x: index * (parent.width - 1) / 4
+                    y: 0
+                    width: 1
+                    height: 5
+                    color: "#3b5149"
+                }
+            }
+
+            Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 1; color: "#24352f" }
+            Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width * root.secFrac; height: 1; color: "#b6fa73" }
+            Rectangle { x: parent.width * root.secFrac - 2; anchors.verticalCenter: parent.verticalCenter; width: 4; height: 5; color: "#b6fa73" }
+        }
     }
 
     Column {
         id: loginForm
-        opacity: root.stage(0.18, 0.5) * root.gflick
+        opacity: root.stage(0.18, 0.5)
         transform: [
             Translate { y: (1 - root.stage(0.18, 0.5)) * 18 },
-            Translate { id: formShake },
-            Translate { x: root.gx * 0.5 }
+            Translate { id: formShake }
         ]
         anchors.left: root.width > 900 ? undefined : parent.left
         anchors.leftMargin: root.width > 900 ? 0 : 28
@@ -739,18 +1020,6 @@ Item {
 
         Row {
             spacing: 0
-            transform: Translate { id: glitchT }
-
-            SequentialAnimation {
-                loops: Animation.Infinite
-                running: root.motionActive
-                PauseAnimation { duration: 6500 }
-                NumberAnimation { target: glitchT; property: "x"; to: 4; duration: 35 }
-                NumberAnimation { target: glitchT; property: "x"; to: -3; duration: 35 }
-                NumberAnimation { target: glitchT; property: "x"; to: 2; duration: 35 }
-                NumberAnimation { target: glitchT; property: "x"; to: 0; duration: 35 }
-                onRunningChanged: if (!running) glitchT.x = 0
-            }
 
             Text {
                 text: "login"
@@ -765,6 +1034,29 @@ Item {
                 font.family: "monospace"
                 font.pixelSize: 29
                 font.weight: Font.Medium
+            }
+            Item {
+                width: 22
+                height: 34
+
+                Rectangle {
+                    id: titleCaret
+                    x: 6
+                    y: 28
+                    width: 14
+                    height: 3
+                    color: "#b6fa73"
+
+                    SequentialAnimation on opacity {
+                        loops: Animation.Infinite
+                        running: root.motionActive
+                        NumberAnimation { to: 0.1; duration: 80 }
+                        PauseAnimation { duration: 420 }
+                        NumberAnimation { to: 1.0; duration: 80 }
+                        PauseAnimation { duration: 420 }
+                        onRunningChanged: if (!running) titleCaret.opacity = 1
+                    }
+                }
             }
         }
 
@@ -1094,11 +1386,8 @@ Item {
 
     Row {
         id: statusRow
-        opacity: root.stage(0.45, 0.45) * root.gflick
-        transform: [
-            Translate { y: (1 - root.stage(0.45, 0.45)) * 10 },
-            Translate { x: root.gx * 0.6 }
-        ]
+        opacity: root.stage(0.45, 0.45)
+        transform: Translate { y: (1 - root.stage(0.45, 0.45)) * 10 }
         anchors.left: parent.left
         anchors.bottom: parent.bottom
         anchors.leftMargin: root.compact ? 24 : 52
@@ -1160,13 +1449,24 @@ Item {
         }
     }
 
+    // Hex data ticker
+    Text {
+        visible: root.width > 1200
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 41
+        text: "RX  " + root.hexLine
+        color: "#4a5f58"
+        font.family: "monospace"
+        font.pixelSize: 10
+        font.letterSpacing: 1.5
+        opacity: root.stage(0.6, 0.4) * 0.85
+    }
+
     Row {
         id: powerRow
-        opacity: root.stage(0.55, 0.45) * root.gflick
-        transform: [
-            Translate { y: (1 - root.stage(0.55, 0.45)) * 10 },
-            Translate { x: root.gx * -0.6 }
-        ]
+        opacity: root.stage(0.55, 0.45)
+        transform: Translate { y: (1 - root.stage(0.55, 0.45)) * 10 }
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: root.compact ? 16 : 40
@@ -1283,6 +1583,35 @@ Item {
                 Behavior on color { enabled: root.motionActive; ColorAnimation { duration: 100 } }
                 Behavior on border.color { enabled: root.motionActive; ColorAnimation { duration: 100 } }
             }
+        }
+    }
+
+    // Cursor reticle: trails the pointer, tightens on click
+    Item {
+        id: reticle
+        x: root.smoothX
+        y: root.smoothY
+        z: 80
+        visible: root.animationsEnabled
+        opacity: (pointerHover.hovered && root.motionActive) ? 1 : 0
+        scale: root.pointerDown ? 0.6 : 1
+        Behavior on opacity { NumberAnimation { duration: 200 } }
+        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+
+        Item {
+            NumberAnimation on rotation {
+                from: 0
+                to: 360
+                duration: 7000
+                loops: Animation.Infinite
+                running: root.motionActive
+            }
+
+            Rectangle { x: -15; y: -15; width: 30; height: 30; radius: 15; color: "transparent"; border.width: 1; border.color: "#b6fa73"; opacity: 0.45 }
+            Rectangle { x: -1; y: -23; width: 2; height: 7; color: "#b6fa73"; opacity: 0.75 }
+            Rectangle { x: -1; y: 16; width: 2; height: 7; color: "#b6fa73"; opacity: 0.75 }
+            Rectangle { x: -23; y: -1; width: 7; height: 2; color: "#b6fa73"; opacity: 0.75 }
+            Rectangle { x: 16; y: -1; width: 7; height: 2; color: "#b6fa73"; opacity: 0.75 }
         }
     }
 

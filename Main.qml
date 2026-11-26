@@ -820,14 +820,16 @@ Item {
         height: 26
         opacity: root.stage(0, 0.4)
 
-        Text {
+        Image {
+            id: themeIcon
+            width: 24
+            height: 24
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
-            text: "A / S"
-            color: "#b6fa73"
-            font.family: "monospace"
-            font.pixelSize: 15
-            font.weight: Font.Bold
+            source: "assets/aurora-terminal-icon.svg"
+            sourceSize.width: 24
+            sourceSize.height: 24
+            smooth: true
         }
 
         Text {

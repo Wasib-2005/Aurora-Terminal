@@ -44,22 +44,49 @@ Press **Ctrl+C** in the terminal to close the test greeter. Test mode is for
 previewing the UI; login, shutdown, restart, and suspend actions do not operate
 as they would in the real SDDM greeter.
 
-## Install
+## Publish on OpenDesktop.org
 
-Clone the repository:
+Create the upload archive from the repository root:
+
+```sh
+./scripts/package.sh
+```
+
+This creates `dist/Aurora-Terminal-1.0.tar.gz`. The archive contains a single
+`Aurora-Terminal/` directory with the SDDM theme descriptor, QML entry point,
+license, icon, and preview image. The archive version is read from
+`metadata.desktop`.
+
+Sign in to [OpenDesktop.org](https://www.opendesktop.org/), create a product in
+the **SDDM Login Screens** category, and upload the `.tar.gz` as its install
+file. Use `assets/aurora-terminal-preview.png` for the product preview and
+include the compatibility details from this README in the product description.
+Set the product license to GNU GPL v3.0 only (`GPL-3.0-only`). Publishing
+requires an OpenDesktop.org account and must be completed from the website.
+
+On KDE Plasma, users can install the published theme from **System Settings →
+Colors & Themes → Login Screen (SDDM) → Get New Login Screens**. After
+installation, select **Aurora Terminal** and apply it. The exact menu labels can
+vary between Plasma versions.
+
+## Install manually
+
+The same archive can be installed without the store:
+
+```sh
+./scripts/package.sh
+sudo tar -xzf dist/Aurora-Terminal-1.0.tar.gz -C /usr/share/sddm/themes/
+```
+
+Or clone the repository and copy the theme files directly:
 
 ```sh
 git clone https://github.com/Wasib-2005/Aurora-Terminal.git
 cd Aurora-Terminal
-```
-
-Install the SDDM theme files:
-
-```sh
 sudo install -d /usr/share/sddm/themes/Aurora-Terminal
 sudo install -d /usr/share/sddm/themes/Aurora-Terminal/assets
-sudo install -m 644 Main.qml metadata.desktop /usr/share/sddm/themes/Aurora-Terminal/
-sudo install -m 644 assets/aurora-terminal-preview.png /usr/share/sddm/themes/Aurora-Terminal/assets/
+sudo install -m 644 Main.qml metadata.desktop LICENSE /usr/share/sddm/themes/Aurora-Terminal/
+sudo install -m 644 assets/aurora-terminal-icon.svg assets/aurora-terminal-preview.png /usr/share/sddm/themes/Aurora-Terminal/assets/
 ```
 
 Then select **Aurora Terminal** in your distribution's SDDM settings tool. On
@@ -79,9 +106,9 @@ sudo rm -r /usr/share/sddm/themes/Aurora-Terminal
 
 - `Main.qml` — Qt Quick login layout, clock, motion graphics, and controls
 - `metadata.desktop` — SDDM theme name, compatibility details, and entry point
+- `assets/aurora-terminal-icon.svg` — terminal-style theme icon
 - `assets/aurora-terminal-preview.png` — screenshot of the running SDDM test greeter
 
 ## License
 
-Aurora Terminal is released under the MIT License, as declared in
-[`metadata.desktop`](./metadata.desktop).
+Aurora Terminal is released under GNU GPL v3.0 only; see [`LICENSE`](./LICENSE).
